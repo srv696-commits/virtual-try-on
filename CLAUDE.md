@@ -4,7 +4,7 @@ Guidelines for Claude Code when working in this repository.
 
 ## Project Overview
 
-Styra is a React + Vite single-page app styled after a Myntra-style ecommerce platform. Its sole feature is an AI virtual try-on: the user uploads two images, the app POSTs them to an n8n webhook, and displays the generated result.
+Styra is a React + Vite single-page app styled after a Myntra-style ecommerce platform. It has Supabase email/password authentication gating the entire app, and an AI virtual try-on feature: the user uploads two images, the app POSTs them to an n8n webhook, and displays the generated result.
 
 ## Commands
 
@@ -16,13 +16,25 @@ npm run preview    # Preview production build locally
 
 ## Architecture
 
-Everything lives in `src/App.jsx` — one file, no routing, no state management library.
+Core source files in `src/`:
+- `supabase.js` — Supabase client singleton (reads from env vars, throws if missing)
+- `AuthPage.jsx` — Login and signup forms; owns all auth UI and Supabase auth API calls
+- `App.jsx` — Full application: Navbar, UploadZone, ResultPanel, session state, try-on logic
 
-Key components (all in `App.jsx`):
-- `Navbar` — ecommerce-style top nav (Styra branding, category links, search, icons)
+Key components (all in `App.jsx` unless noted):
+- `Navbar` — ecommerce-style top nav; accepts `user` and `onLogout` props; shows user name + Logout when authenticated
 - `UploadZone` — drag-and-drop + click-to-browse image uploader (accepts JPEG/PNG only)
 - `ResultPanel` — three states: empty placeholder, loading skeleton, result image + download
-- `App` (root) — holds all state, orchestrates the API call
+- `App` (root) — holds session state and try-on state, orchestrates auth flow and API call
+
+## Auth Flow
+
+- On mount, `App` calls `supabase.auth.getSession()` to restore any existing session
+- `supabase.auth.onAuthStateChange()` keeps session state in sync
+- If no session → renders `<AuthPage>`; if session exists → renders the try-on studio
+- `AuthPage` calls `supabase.auth.signUp()` (with `options.data.name` for the user's name) and `supabase.auth.signInWithPassword()`
+- Email confirmation is enabled: after signup, `data.session` is null and a "Check your inbox" screen is shown
+- Logout calls `supabase.auth.signOut()` and sets `user` to null
 
 ## API Integration
 
@@ -38,8 +50,10 @@ All secrets and URLs must live in `.env` (gitignored). Use `.env.example` as the
 | Variable | Purpose |
 |---|---|
 | `VITE_WEBHOOK_URL` | n8n webhook for AI image merging |
+| `VITE_SUPABASE_URL` | Supabase project API URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase publishable/anon key |
 
-A runtime guard in `App.jsx` throws immediately if `VITE_WEBHOOK_URL` is undefined — don't remove it.
+Runtime guards in `App.jsx` and `supabase.js` throw immediately if required env vars are missing — don't remove them.
 
 ## Style Guide
 
@@ -51,7 +65,7 @@ A runtime guard in `App.jsx` throws immediately if `VITE_WEBHOOK_URL` is undefin
 ## Security Rules
 
 - Never commit `.env` — it is gitignored
-- Never hardcode the webhook URL or any API key in source files
+- Never hardcode the webhook URL, Supabase URL, or any API key in source files
 - Add new secrets to `.env.example` (with empty value) so collaborators know they exist
 - If adding a new external service, evaluate whether it needs a backend proxy to hide credentials from the browser bundle
 
@@ -60,4 +74,4 @@ A runtime guard in `App.jsx` throws immediately if `VITE_WEBHOOK_URL` is undefin
 - Don't add a router — this is intentionally a single page
 - Don't introduce a global state library (Redux, Zustand) for this scope
 - Don't accept image formats beyond JPEG and PNG without explicit request
-- Don't remove the `VITE_WEBHOOK_URL` runtime guard
+- Don't remove the `VITE_WEBHOOK_URL` or Supabase env var runtime guards
