@@ -45,3 +45,5 @@ pnpm-debug.log*
 .cache/
 .temp/
 
+# mcp servers
+.mcp.json

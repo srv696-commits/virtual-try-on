@@ -1,16 +1,18 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   Search, Heart, ShoppingBag, User, Upload, Download,
   Sparkles, X, AlertCircle, ImageIcon, Star, Zap,
   ChevronRight, ArrowRight, CheckCircle2
 } from 'lucide-react'
+import { supabase } from './supabase.js'
+import AuthPage from './AuthPage.jsx'
 
 const WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL
 
 const NAV_LINKS = ['MEN', 'WOMEN', 'KIDS', 'HOME', 'BEAUTY', 'IDEAS']
 
 // ─── Navbar ──────────────────────────────────────────────────────────────────
-function Navbar() {
+function Navbar({ user, onLogout }) {
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
       <div className="max-w-[1280px] mx-auto flex items-center gap-6 px-6 h-14">
@@ -41,12 +43,32 @@ function Navbar() {
         </div>
 
         <div className="flex items-center gap-5 ml-auto">
-          {[{ icon: <User size={19} />, label: 'Profile' }, { icon: <Heart size={19} />, label: 'Wishlist' }, { icon: <ShoppingBag size={19} />, label: 'Bag' }].map(({ icon, label }) => (
-            <button key={label} className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#ff3f6c] transition-colors">
-              {icon}
-              <span className="text-[10px] font-medium">{label}</span>
+          <button className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#ff3f6c] transition-colors">
+            <Heart size={19} />
+            <span className="text-[10px] font-medium">Wishlist</span>
+          </button>
+          <button className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#ff3f6c] transition-colors">
+            <ShoppingBag size={19} />
+            <span className="text-[10px] font-medium">Bag</span>
+          </button>
+          {user ? (
+            <div className="flex items-center gap-3">
+              <span className="text-[12px] font-semibold text-gray-700 hidden md:block">
+                {user.user_metadata?.name ?? user.email}
+              </span>
+              <button
+                onClick={onLogout}
+                className="text-[12px] font-bold text-[#ff3f6c] border border-[#ff3f6c] px-3 py-1.5 rounded-lg hover:bg-[#ff3f6c] hover:text-white transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <button className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#ff3f6c] transition-colors">
+              <User size={19} />
+              <span className="text-[10px] font-medium">Profile</span>
             </button>
-          ))}
+          )}
         </div>
       </div>
     </header>
@@ -218,6 +240,20 @@ function ResultPanel({ resultImage, isLoading }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
+  const [user, setUser] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null)
+      setAuthLoading(false)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
   const [file1, setFile1] = useState(null)
   const [file2, setFile2] = useState(null)
   const [resultImage, setResultImage] = useState(null)
@@ -225,6 +261,11 @@ export default function App() {
   const [error, setError] = useState(null)
 
   const canGenerate = !!file1 && !!file2 && !isLoading
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    setUser(null)
+  }
 
   const handleGenerate = async () => {
     if (!canGenerate) return
@@ -257,9 +298,21 @@ export default function App() {
 
   const bothUploaded = !!file1 && !!file2
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-4 border-[#ff3f6c] border-t-transparent animate-spin" />
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <AuthPage onAuthSuccess={(u) => setUser(u)} />
+  }
+
   return (
     <div className="min-h-screen bg-[#fafafa] font-sans">
-      <Navbar />
+      <Navbar user={user} onLogout={handleLogout} />
 
       {/* Breadcrumb */}
       <div className="max-w-[1280px] mx-auto px-6 pt-4 flex items-center gap-1 text-[12px] text-gray-400">
