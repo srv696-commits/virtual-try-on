@@ -7,10 +7,6 @@ import {
 
 const WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL
 
-if (!WEBHOOK_URL) {
-  throw new Error('VITE_WEBHOOK_URL is not defined. Add it to your .env file.')
-}
-
 const NAV_LINKS = ['MEN', 'WOMEN', 'KIDS', 'HOME', 'BEAUTY', 'IDEAS']
 
 // ─── Navbar ──────────────────────────────────────────────────────────────────
@@ -232,6 +228,10 @@ export default function App() {
 
   const handleGenerate = async () => {
     if (!canGenerate) return
+    if (!WEBHOOK_URL) {
+      setError('Webhook URL is not configured. Add VITE_WEBHOOK_URL to your Vercel environment variables.')
+      return
+    }
     setIsLoading(true)
     setError(null)
     setResultImage(null)
