@@ -2,12 +2,13 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   Search, Heart, ShoppingBag, User, Upload, Download,
   Sparkles, X, AlertCircle, ImageIcon, Star, Zap,
-  ChevronRight, ArrowRight, CheckCircle2
+  ChevronRight, ArrowRight, CheckCircle2, Lock
 } from 'lucide-react'
 import { supabase } from './supabase.js'
 import AuthPage from './AuthPage.jsx'
 
 const WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL
+const PAYMENT_LINK = import.meta.env.VITE_STRIPE_PAYMENT_LINK
 
 const NAV_LINKS = ['MEN', 'WOMEN', 'KIDS', 'HOME', 'BEAUTY', 'IDEAS']
 
@@ -238,10 +239,68 @@ function ResultPanel({ resultImage, isLoading }) {
   )
 }
 
+// ─── Paywall Screen ───────────────────────────────────────────────────────────
+function PaywallScreen({ user, onLogout, paymentError, onClearError }) {
+  const handleSubscribe = () => {
+    window.location.href = `${PAYMENT_LINK}?client_reference_id=${user.id}`
+  }
+
+  return (
+    <div className="min-h-screen bg-[#fafafa] flex flex-col">
+      <Navbar user={user} onLogout={onLogout} />
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-10 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Lock size={28} className="text-[#ff3f6c]" />
+          </div>
+          <h2 className="text-[24px] font-black text-gray-900 tracking-tight">Unlock Styra Studio</h2>
+          <p className="text-[14px] text-gray-500 mt-2">Get unlimited access to AI virtual try-on</p>
+          <p className="text-[32px] font-black text-[#ff3f6c] mt-5">
+            $9.99<span className="text-[16px] font-semibold text-gray-400"> / month</span>
+          </p>
+          <p className="text-[12px] text-gray-400 mb-6">Cancel anytime</p>
+
+          <ul className="text-left space-y-2.5 mb-8">
+            {['Unlimited AI try-ons', 'Download your results', 'New features every month'].map((f) => (
+              <li key={f} className="flex items-center gap-2 text-[13px] text-gray-600">
+                <CheckCircle2 size={14} className="text-[#ff3f6c] shrink-0" />
+                {f}
+              </li>
+            ))}
+          </ul>
+
+          {paymentError && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4 text-left">
+              <AlertCircle size={14} className="text-red-500 shrink-0" />
+              <p className="text-[12px] text-red-600 flex-1">{paymentError}</p>
+              <button onClick={onClearError}><X size={13} className="text-red-400" /></button>
+            </div>
+          )}
+
+          <button
+            onClick={handleSubscribe}
+            className="w-full py-3.5 bg-[#ff3f6c] text-white font-black text-[15px] rounded-xl hover:bg-[#e8365f] transition-colors shadow-[0_4px_16px_rgba(255,63,108,0.35)]"
+          >
+            Subscribe for $9.99 / month
+          </button>
+          <button onClick={onLogout} className="mt-4 block w-full text-[12px] text-gray-400 hover:text-gray-600 transition-colors">
+            Log out
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [profile, setProfile] = useState(null)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [verifyingPayment, setVerifyingPayment] = useState(false)
+  const [paymentError, setPaymentError] = useState(null)
+  const sessionHandledRef = useRef(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -250,9 +309,44 @@ export default function App() {
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
+      if (!session) setProfile(null)
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  // Fetch profile whenever user changes
+  useEffect(() => {
+    if (!user) return
+    setProfileLoading(true)
+    supabase.from('profiles').select('subscription_status').eq('id', user.id).single()
+      .then(({ data }) => {
+        setProfile(data ?? { subscription_status: 'free' })
+        setProfileLoading(false)
+      })
+  }, [user?.id])
+
+  // Handle ?session_id=cs_... redirect back from Stripe checkout
+  useEffect(() => {
+    if (!user || profileLoading || sessionHandledRef.current) return
+    const params = new URLSearchParams(window.location.search)
+    const sessionId = params.get('session_id')
+    if (!sessionId || !sessionId.startsWith('cs_')) return
+
+    sessionHandledRef.current = true
+    window.history.replaceState({}, '', window.location.pathname)
+    setVerifyingPayment(true)
+
+    supabase.functions.invoke('verify-payment', { body: { session_id: sessionId } })
+      .then(async ({ data, error }) => {
+        if (error || data?.error) {
+          setPaymentError(error?.message || data?.error || 'Payment verification failed. Please contact support.')
+        } else {
+          const { data: profileData } = await supabase.from('profiles').select('subscription_status').eq('id', user.id).single()
+          setProfile(profileData ?? { subscription_status: 'free' })
+        }
+      })
+      .finally(() => setVerifyingPayment(false))
+  }, [user, profileLoading])
 
   const [file1, setFile1] = useState(null)
   const [file2, setFile2] = useState(null)
@@ -298,7 +392,7 @@ export default function App() {
 
   const bothUploaded = !!file1 && !!file2
 
-  if (authLoading) {
+  if (authLoading || profileLoading) {
     return (
       <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
         <div className="w-8 h-8 rounded-full border-4 border-[#ff3f6c] border-t-transparent animate-spin" />
@@ -308,6 +402,29 @@ export default function App() {
 
   if (!user) {
     return <AuthPage onAuthSuccess={(u) => setUser(u)} />
+  }
+
+  if (verifyingPayment) {
+    return (
+      <div className="min-h-screen bg-[#fafafa] flex flex-col">
+        <Navbar user={user} onLogout={handleLogout} />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <div className="w-8 h-8 rounded-full border-4 border-[#ff3f6c] border-t-transparent animate-spin" />
+          <p className="text-[14px] font-semibold text-gray-600">Verifying your payment…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (profile?.subscription_status !== 'active') {
+    return (
+      <PaywallScreen
+        user={user}
+        onLogout={handleLogout}
+        paymentError={paymentError}
+        onClearError={() => setPaymentError(null)}
+      />
+    )
   }
 
   return (
