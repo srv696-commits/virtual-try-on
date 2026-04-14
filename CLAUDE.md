@@ -1,77 +1,81 @@
-# CLAUDE.md — Styra Virtual Try-On Studio
+# CLAUDE.md
 
-Guidelines for Claude Code when working in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-Styra is a React + Vite single-page app styled after a Myntra-style ecommerce platform. It has Supabase email/password authentication gating the entire app, and an AI virtual try-on feature: the user uploads two images, the app POSTs them to an n8n webhook, and displays the generated result.
+Styra is a React + Vite single-page app styled after a Myntra-style ecommerce platform. Supabase email/password authentication gates the entire app. The core feature is AI virtual try-on: the user uploads two images, the app POSTs them to an n8n webhook, and displays the generated result image.
 
 ## Commands
 
 ```bash
-npm run dev        # Start dev server at http://localhost:5173
+npm run dev        # Start dev server (port 5173, or next free port)
 npm run build      # Production build → dist/
 npm run preview    # Preview production build locally
 ```
 
-## Architecture
-
-Core source files in `src/`:
-- `supabase.js` — Supabase client singleton (reads from env vars, throws if missing)
-- `AuthPage.jsx` — Login and signup forms; owns all auth UI and Supabase auth API calls
-- `App.jsx` — Full application: Navbar, UploadZone, ResultPanel, session state, try-on logic
-
-Key components (all in `App.jsx` unless noted):
-- `Navbar` — ecommerce-style top nav; accepts `user` and `onLogout` props; shows user name + Logout when authenticated
-- `UploadZone` — drag-and-drop + click-to-browse image uploader (accepts JPEG/PNG only)
-- `ResultPanel` — three states: empty placeholder, loading skeleton, result image + download
-- `App` (root) — holds session state and try-on state, orchestrates auth flow and API call
-
-## Auth Flow
-
-- On mount, `App` calls `supabase.auth.getSession()` to restore any existing session
-- `supabase.auth.onAuthStateChange()` keeps session state in sync
-- If no session → renders `<AuthPage>`; if session exists → renders the try-on studio
-- `AuthPage` calls `supabase.auth.signUp()` (with `options.data.name` for the user's name) and `supabase.auth.signInWithPassword()`
-- Email confirmation is enabled: after signup, `data.session` is null and a "Check your inbox" screen is shown
-- Logout calls `supabase.auth.signOut()` and sets `user` to null
-
-## API Integration
-
-- Endpoint lives in `VITE_WEBHOOK_URL` (`.env`) — never hardcode it in source
-- Method: `POST multipart/form-data`
-- Form keys: `image1` (person), `image2` (clothing)
-- Response: binary image blob → `URL.createObjectURL(blob)`
+No test runner is configured.
 
 ## Environment Variables
 
-All secrets and URLs must live in `.env` (gitignored). Use `.env.example` as the committed template.
+Secrets live in `.env.local` (gitignored by Vite's `*.local` rule). `.env.example` is the committed template with empty values.
 
-| Variable | Purpose |
-|---|---|
-| `VITE_WEBHOOK_URL` | n8n webhook for AI image merging |
-| `VITE_SUPABASE_URL` | Supabase project API URL |
-| `VITE_SUPABASE_ANON_KEY` | Supabase publishable/anon key |
+| Variable | Where | Purpose |
+|---|---|---|
+| `VITE_WEBHOOK_URL` | `.env.local` | n8n webhook endpoint for AI image merging |
+| `VITE_SUPABASE_URL` | `.env.local` | Supabase project API URL (public) |
+| `VITE_SUPABASE_ANON_KEY` | `.env.local` | Supabase publishable key (public) |
 
-Runtime guards in `App.jsx` and `supabase.js` throw immediately if required env vars are missing — don't remove them.
+Server-side secrets (never in `VITE_*` vars — would be exposed in the browser bundle):
+- `STRIPE_SECRET_KEY` → set via Supabase edge function secrets, not in any local file
+
+Runtime guards in `supabase.js` throw immediately if `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` are missing.
+
+## Architecture
+
+All source is in `src/` — just four files:
+
+- **`supabase.js`** — Supabase client singleton. Throws on missing env vars. Import `{ supabase }` from here everywhere.
+- **`AuthPage.jsx`** — Standalone login/signup UI. Calls `supabase.auth.signUp()` and `supabase.auth.signInWithPassword()`. Email confirmation is enabled: after signup, `data.session` is null and a confirmation screen is shown. Accepts `onAuthSuccess(user)` prop.
+- **`App.jsx`** — Everything else: `Navbar`, `UploadZone`, `ResultPanel`, and the root `App` component. All state lives here; no prop drilling beyond direct parent→child.
+
+### Auth flow
+
+`App` calls `supabase.auth.getSession()` on mount and subscribes to `onAuthStateChange` for the lifetime of the app. `user === null` → renders `<AuthPage>`; `user` set → renders the studio.
+
+### Try-on flow
+
+`UploadZone` (×2) → user uploads JPEG/PNG files → `handleGenerate` POSTs `FormData` (`image1`, `image2`) to `VITE_WEBHOOK_URL` → response is a binary image blob → `URL.createObjectURL(blob)` → `ResultPanel` displays it.
+
+### Supabase database
+
+`public.profiles` table (one row per auth user, FK → `auth.users`):
+- `id` uuid PK
+- `subscription_status` text — `'free'` | `'active'`
+- `stripe_payment_id` text nullable
+- `created_at`, `updated_at` timestamptz
+
+RLS is enabled. An `on_profiles_updated` trigger auto-sets `updated_at`.
+
+### Supabase edge function
+
+`verify-payment` — verifies a Stripe checkout session and marks a user as paid.
+- `POST /functions/v1/verify-payment`
+- Requires `Authorization: Bearer <user_jwt>` header
+- Body: `{ session_id: "cs_..." }`
+- Reads `STRIPE_SECRET_KEY` from Supabase secrets; returns 503 if not set
+- Calls `GET https://api.stripe.com/v1/checkout/sessions/{id}`, checks `payment_status === 'paid'` and `client_reference_id === user.id`, then updates `profiles.subscription_status = 'active'` using the service role key
 
 ## Style Guide
 
 - Theme: white background (`#fafafa`), Myntra-pink accent (`#ff3f6c`), gray borders
-- Font: Inter (loaded via Google Fonts in `index.html`)
+- Font: Inter via Google Fonts in `index.html`
 - Tailwind only — no custom CSS beyond `src/index.css` base reset
-- No dark mode — this is a light-theme ecommerce UI
+- No dark mode
 
-## Security Rules
+## Constraints
 
-- Never commit `.env` — it is gitignored
-- Never hardcode the webhook URL, Supabase URL, or any API key in source files
-- Add new secrets to `.env.example` (with empty value) so collaborators know they exist
-- If adding a new external service, evaluate whether it needs a backend proxy to hide credentials from the browser bundle
-
-## What to Avoid
-
-- Don't add a router — this is intentionally a single page
-- Don't introduce a global state library (Redux, Zustand) for this scope
-- Don't accept image formats beyond JPEG and PNG without explicit request
-- Don't remove the `VITE_WEBHOOK_URL` or Supabase env var runtime guards
+- No router — intentionally a single page
+- No global state library (Redux, Zustand) — `App` state is sufficient for this scope
+- Images: JPEG and PNG only
+- Don't remove runtime env var guards in `supabase.js`

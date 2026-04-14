@@ -47,3 +47,6 @@ pnpm-debug.log*
 
 # mcp servers
 .mcp.json
+
+# playwright test artifacts
+.playwright-mcp/
