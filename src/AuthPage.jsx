@@ -1,13 +1,15 @@
 import { useState } from 'react'
-import { AlertCircle, X, Mail } from 'lucide-react'
+import { AlertCircle, X, Mail, ArrowLeft, KeyRound } from 'lucide-react'
 import { supabase } from './supabase.js'
 
-export default function AuthPage({ onAuthSuccess }) {
+export default function AuthPage({ onAuthSuccess, resetMode = false, onPasswordReset }) {
   const [mode, setMode] = useState('login')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [confirmationSent, setConfirmationSent] = useState(false)
@@ -45,6 +47,29 @@ export default function AuthPage({ onAuthSuccess }) {
     }
   }
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    })
+    setLoading(false)
+    if (error) { setError(error.message); return }
+    setConfirmationSent(true)
+  }
+
+  const handleSetNewPassword = async (e) => {
+    e.preventDefault()
+    if (newPassword !== confirmNewPassword) { setError('Passwords do not match.'); return }
+    if (newPassword.length < 6) { setError('Password must be at least 6 characters.'); return }
+    setLoading(true)
+    setError(null)
+    const errMsg = await onPasswordReset(newPassword)
+    setLoading(false)
+    if (errMsg) setError(errMsg)
+  }
+
   const switchMode = (newMode) => {
     setMode(newMode)
     setError(null)
@@ -57,6 +82,7 @@ export default function AuthPage({ onAuthSuccess }) {
 
   const inputClass = 'w-full bg-gray-100 rounded-lg px-3 py-2.5 text-[13px] text-gray-700 placeholder-gray-400 outline-none focus:ring-2 focus:ring-[#ff3f6c]/30 focus:bg-white transition-all'
   const labelClass = 'block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1'
+  const submitBtnClass = 'w-full bg-[#ff3f6c] text-white font-bold text-[13px] py-3 rounded-xl hover:bg-[#e8365f] transition-colors shadow-[0_2px_8px_rgba(255,63,108,0.3)] disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-2'
 
   return (
     <div className="min-h-screen bg-[#fafafa] flex flex-col items-center justify-center px-4">
@@ -70,26 +96,133 @@ export default function AuthPage({ onAuthSuccess }) {
           <span className="font-black text-[22px] tracking-tight text-[#ff3f6c] leading-none">tyra</span>
         </div>
 
-        {confirmationSent ? (
-          /* Confirmation pending screen */
+        {/* ── Set new password (PASSWORD_RECOVERY redirect) ── */}
+        {resetMode ? (
+          <div>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 bg-pink-50 rounded-xl flex items-center justify-center shrink-0">
+                <KeyRound size={18} className="text-[#ff3f6c]" />
+              </div>
+              <div>
+                <h2 className="text-[15px] font-black text-gray-900">Set new password</h2>
+                <p className="text-[12px] text-gray-400">Choose a strong password</p>
+              </div>
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4">
+                <AlertCircle size={15} className="text-red-500 shrink-0" />
+                <p className="text-[12px] text-red-600 flex-1">{error}</p>
+                <button onClick={clearError} className="text-red-400 hover:text-red-600"><X size={14} /></button>
+              </div>
+            )}
+
+            <form onSubmit={handleSetNewPassword} className="space-y-4">
+              <div>
+                <label className={labelClass}>New Password</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  className={inputClass}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Confirm New Password</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  className={inputClass}
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" disabled={loading} className={submitBtnClass}>
+                {loading && (
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                )}
+                Update Password
+              </button>
+            </form>
+          </div>
+
+        ) : confirmationSent ? (
+          /* ── Check your email screen ── */
           <div className="text-center">
             <div className="w-14 h-14 bg-pink-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <Mail size={26} className="text-[#ff3f6c]" />
             </div>
             <h2 className="text-[16px] font-black text-gray-900 mb-2">Check your inbox</h2>
-            <p className="text-[13px] text-gray-500 mb-1">We sent a confirmation link to</p>
+            <p className="text-[13px] text-gray-500 mb-1">
+              {mode === 'forgot' ? 'We sent a password reset link to' : 'We sent a confirmation link to'}
+            </p>
             <p className="text-[13px] font-semibold text-gray-800 mb-5">{email}</p>
             <p className="text-[12px] text-gray-400 mb-5">
-              Click the link in the email to activate your account, then log in below.
+              {mode === 'forgot'
+                ? 'Click the link in the email to reset your password.'
+                : 'Click the link in the email to activate your account, then log in below.'}
             </p>
             <button
               onClick={() => switchMode('login')}
               className="w-full bg-[#ff3f6c] text-white font-bold text-[13px] py-3 rounded-xl hover:bg-[#e8365f] transition-colors shadow-[0_2px_8px_rgba(255,63,108,0.3)]"
             >
-              Go to Log In
+              {mode === 'forgot' ? 'Back to Log In' : 'Go to Log In'}
             </button>
           </div>
+
+        ) : mode === 'forgot' ? (
+          /* ── Forgot password form ── */
+          <div>
+            <button
+              onClick={() => switchMode('login')}
+              className="flex items-center gap-1.5 text-[12px] text-gray-400 hover:text-gray-600 transition-colors mb-5"
+            >
+              <ArrowLeft size={13} />
+              Back to Log In
+            </button>
+            <h2 className="text-[15px] font-black text-gray-900 mb-1">Forgot your password?</h2>
+            <p className="text-[12px] text-gray-400 mb-5">Enter your email and we'll send you a reset link.</p>
+
+            {error && (
+              <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4">
+                <AlertCircle size={15} className="text-red-500 shrink-0" />
+                <p className="text-[12px] text-red-600 flex-1">{error}</p>
+                <button onClick={clearError} className="text-red-400 hover:text-red-600"><X size={14} /></button>
+              </div>
+            )}
+
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div>
+                <label className={labelClass}>Email</label>
+                <input
+                  type="email"
+                  placeholder="you@example.com"
+                  className={inputClass}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" disabled={loading} className={submitBtnClass}>
+                {loading && (
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                )}
+                Send Reset Link
+              </button>
+            </form>
+          </div>
+
         ) : (
+          /* ── Login / Signup forms ── */
           <>
             {/* Mode tabs */}
             <div className="flex border-b border-gray-200 mb-6">
@@ -157,6 +290,17 @@ export default function AuthPage({ onAuthSuccess }) {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                 />
+                {mode === 'login' && (
+                  <div className="flex justify-end mt-1">
+                    <button
+                      type="button"
+                      onClick={() => switchMode('forgot')}
+                      className="text-[11px] text-gray-400 hover:text-[#ff3f6c] transition-colors"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
               </div>
 
               {mode === 'signup' && (
@@ -176,7 +320,7 @@ export default function AuthPage({ onAuthSuccess }) {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-[#ff3f6c] text-white font-bold text-[13px] py-3 rounded-xl hover:bg-[#e8365f] transition-colors shadow-[0_2px_8px_rgba(255,63,108,0.3)] disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-2"
+                className={submitBtnClass}
               >
                 {loading && (
                   <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">

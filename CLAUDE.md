@@ -25,6 +25,7 @@ Secrets live in `.env.local` (gitignored by Vite's `*.local` rule). `.env.exampl
 | `VITE_WEBHOOK_URL` | `.env.local` | n8n webhook endpoint for AI image merging |
 | `VITE_SUPABASE_URL` | `.env.local` | Supabase project API URL (public) |
 | `VITE_SUPABASE_ANON_KEY` | `.env.local` | Supabase publishable key (public) |
+| `VITE_STRIPE_PAYMENT_LINK` | `.env.local` | Stripe payment link URL for subscription checkout |
 
 Server-side secrets (never in `VITE_*` vars — would be exposed in the browser bundle):
 - `STRIPE_SECRET_KEY` → set via Supabase edge function secrets, not in any local file
@@ -36,12 +37,16 @@ Runtime guards in `supabase.js` throw immediately if `VITE_SUPABASE_URL` or `VIT
 All source is in `src/` — just four files:
 
 - **`supabase.js`** — Supabase client singleton. Throws on missing env vars. Import `{ supabase }` from here everywhere.
-- **`AuthPage.jsx`** — Standalone login/signup UI. Calls `supabase.auth.signUp()` and `supabase.auth.signInWithPassword()`. Email confirmation is enabled: after signup, `data.session` is null and a confirmation screen is shown. Accepts `onAuthSuccess(user)` prop.
-- **`App.jsx`** — Everything else: `Navbar`, `UploadZone`, `ResultPanel`, and the root `App` component. All state lives here; no prop drilling beyond direct parent→child.
+- **`AuthPage.jsx`** — Standalone auth UI with four modes: `login`, `signup`, `forgot` (send reset email), and a `resetMode` prop-driven screen (set new password). Email confirmation is enabled: after signup, `data.session` is null and a confirmation screen is shown. Props: `onAuthSuccess(user)`, `resetMode` (bool), `onPasswordReset(newPassword)`.
+- **`App.jsx`** — Everything else: `Navbar`, `UploadZone`, `ResultPanel`, `PaywallScreen`, and the root `App` component. All state lives here; no prop drilling beyond direct parent→child.
 
 ### Auth flow
 
-`App` calls `supabase.auth.getSession()` on mount and subscribes to `onAuthStateChange` for the lifetime of the app. `user === null` → renders `<AuthPage>`; `user` set → renders the studio.
+`App` calls `supabase.auth.getSession()` on mount and subscribes to `onAuthStateChange` for the lifetime of the app. `user === null || isResettingPassword` → renders `<AuthPage>`; otherwise renders the studio or paywall.
+
+**Password reset:** `onAuthStateChange` fires `PASSWORD_RECOVERY` when a user clicks a reset link. App sets `isResettingPassword = true`, renders `<AuthPage resetMode>`. User submits new password → `supabase.auth.updateUser({ password })` → `isResettingPassword` cleared → `SIGNED_IN` event fires normally.
+
+**Email sending:** Supabase is configured with Resend as the custom SMTP provider. If auth emails stop working, check Supabase Dashboard → Project Settings → Authentication → SMTP Settings.
 
 ### Try-on flow
 

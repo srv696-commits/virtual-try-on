@@ -300,6 +300,7 @@ export default function App() {
   const [profileLoading, setProfileLoading] = useState(false)
   const [verifyingPayment, setVerifyingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState(null)
+  const [isResettingPassword, setIsResettingPassword] = useState(false)
   const sessionHandledRef = useRef(false)
 
   useEffect(() => {
@@ -307,7 +308,11 @@ export default function App() {
       setUser(session?.user ?? null)
       setAuthLoading(false)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsResettingPassword(true)
+        return
+      }
       setUser(session?.user ?? null)
       if (!session) setProfile(null)
     })
@@ -361,6 +366,12 @@ export default function App() {
     setUser(null)
   }
 
+  const handlePasswordReset = async (newPassword) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) return error.message
+    setIsResettingPassword(false)
+  }
+
   const handleGenerate = async () => {
     if (!canGenerate) return
     if (!WEBHOOK_URL) {
@@ -400,8 +411,14 @@ export default function App() {
     )
   }
 
-  if (!user) {
-    return <AuthPage onAuthSuccess={(u) => setUser(u)} />
+  if (!user || isResettingPassword) {
+    return (
+      <AuthPage
+        onAuthSuccess={(u) => setUser(u)}
+        resetMode={isResettingPassword}
+        onPasswordReset={handlePasswordReset}
+      />
+    )
   }
 
   if (verifyingPayment) {
