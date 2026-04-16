@@ -39,6 +39,8 @@ pnpm-debug.log*
 *.webp
 # Exception: keep any images intentionally in src/assets
 !src/assets/**
+# Exception: Shop-the-Look catalog served from /public/catalog
+!public/catalog/**
 
 # ─── Misc ─────────────────────────────────────────────────────────────────────
 *.local

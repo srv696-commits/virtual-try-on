@@ -38,7 +38,9 @@ All source is in `src/` — just four files:
 
 - **`supabase.js`** — Supabase client singleton. Throws on missing env vars. Import `{ supabase }` from here everywhere.
 - **`AuthPage.jsx`** — Standalone auth UI with four modes: `login`, `signup`, `forgot` (send reset email), and a `resetMode` prop-driven screen (set new password). Email confirmation is enabled: after signup, `data.session` is null and a confirmation screen is shown. Props: `onAuthSuccess(user)`, `resetMode` (bool), `onPasswordReset(newPassword)`.
-- **`App.jsx`** — Everything else: `Navbar`, `UploadZone`, `ResultPanel`, `PaywallScreen`, and the root `App` component. All state lives here; no prop drilling beyond direct parent→child.
+- **`App.jsx`** — Everything else: `Navbar`, `CatalogPicker`, `UploadZone`, `ResultPanel`, `PaywallModal`, `SubscriptionBanner`, and the root `App` component. All state lives here; no prop drilling beyond direct parent→child.
+
+Static catalog images for the "Shop the Look" feature live in `public/catalog/item-{1..4}.png` and are served at `/catalog/*.png`.
 
 ### Auth flow
 
@@ -52,6 +54,20 @@ All source is in `src/` — just four files:
 
 `UploadZone` (×2) → user uploads JPEG/PNG files → `handleGenerate` POSTs `FormData` (`image1`, `image2`) to `VITE_WEBHOOK_URL` → response is a binary image blob → `URL.createObjectURL(blob)` → `ResultPanel` displays it.
 
+**Catalog shortcut:** `CatalogPicker` renders the `CATALOG` array. Clicking an item calls `urlToFile(src)` (fetch → blob → `File`) and sets it as `file2`, so the user only needs to upload the person photo. The selected item gets a pink ring.
+
+### Paywall flow
+
+The studio is **not** gated at login — all signed-in users see the full UI. Gating happens at `handleGenerate`:
+
+- Free users get **one free generation** per user id. A flag is persisted in `localStorage` under `styra:free-try-used:<user.id>` and mirrored to `freeTryUsed` state.
+- When `subscription_status !== 'active'` and `freeTryUsed === true`, `handleGenerate` opens `<PaywallModal>` instead of calling the webhook.
+- On a successful generation by a non-subscribed user, the flag is set so the next click shows the modal.
+- `<SubscriptionBanner>` sits below the navbar for non-subscribed users and switches copy based on `freeTryUsed`.
+- Active subscribers get no banner, no modal, unlimited generations.
+
+**Post-payment return:** the `session_id` effect invokes `verify-payment`, then refetches the profile. If the first refetch still reads `'free'` (DB propagation race), it retries once after 1 s. On success, a toast is shown and `showPaywall` is cleared. On failure, `paymentError` is surfaced inside the modal so the user can retry without losing context.
+
 ### Supabase database
 
 `public.profiles` table (one row per auth user, FK → `auth.users`):
@@ -62,6 +78,8 @@ All source is in `src/` — just four files:
 
 RLS is enabled. An `on_profiles_updated` trigger auto-sets `updated_at`.
 
+**Required invariant:** every auth user must have a corresponding `profiles` row. An `on_auth_user_created` trigger inserts `{id, subscription_status: 'free'}` on every signup. Without it, `verify-payment` updates zero rows (silent no-op) and paid users get stuck on the paywall — the setup SQL is in README.md. Frontend uses `.maybeSingle()` on profile reads so a missing row returns `null` cleanly rather than 406.
+
 ### Supabase edge function
 
 `verify-payment` — verifies a Stripe checkout session and marks a user as paid.
@@ -70,6 +88,8 @@ RLS is enabled. An `on_profiles_updated` trigger auto-sets `updated_at`.
 - Body: `{ session_id: "cs_..." }`
 - Reads `STRIPE_SECRET_KEY` from Supabase secrets; returns 503 if not set
 - Calls `GET https://api.stripe.com/v1/checkout/sessions/{id}`, checks `payment_status === 'paid'` and `client_reference_id === user.id`, then updates `profiles.subscription_status = 'active'` using the service role key
+
+**Stripe Payment Link setup (required):** the Payment Link's **success URL** in the Stripe Dashboard must be `https://<app-domain>/?session_id={CHECKOUT_SESSION_ID}` (keep the placeholder literal). Without this, the app never sees `session_id` after checkout and `verify-payment` never fires — users appear stuck on the paywall. Also make sure the Stripe product name/description does not claim "lifetime" — Styra is a monthly subscription.
 
 ## Style Guide
 

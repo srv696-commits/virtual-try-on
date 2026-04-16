@@ -12,6 +12,65 @@ const PAYMENT_LINK = import.meta.env.VITE_STRIPE_PAYMENT_LINK
 
 const NAV_LINKS = ['MEN', 'WOMEN', 'KIDS', 'HOME', 'BEAUTY', 'IDEAS']
 
+const CATALOG = [
+  { id: 1, src: '/catalog/item-1.png', name: 'Look 01' },
+  { id: 2, src: '/catalog/item-2.png', name: 'Look 02' },
+  { id: 3, src: '/catalog/item-3.png', name: 'Look 03' },
+  { id: 4, src: '/catalog/item-4.png', name: 'Look 04' },
+]
+
+async function urlToFile(url, filename = 'clothing.png') {
+  const res = await fetch(url)
+  const blob = await res.blob()
+  return new File([blob], filename, { type: blob.type || 'image/png' })
+}
+
+// ─── Catalog Picker ──────────────────────────────────────────────────────────
+function CatalogPicker({ onPick, selectedSrc }) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm mb-5">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h3 className="text-[14px] font-black text-gray-900">Shop the Look</h3>
+          <p className="text-[11px] text-gray-400">Click any item to try it on</p>
+        </div>
+        <span className="text-[10px] font-bold bg-[#ff3f6c] text-white px-2 py-1 rounded-full">NEW</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {CATALOG.map((item) => {
+          const active = selectedSrc === item.src
+          return (
+            <button
+              key={item.id}
+              onClick={() => onPick(item)}
+              className={`group relative rounded-xl overflow-hidden border-2 transition-all aspect-[3/4] ${
+                active
+                  ? 'border-[#ff3f6c] shadow-[0_0_0_4px_rgba(255,63,108,0.12)]'
+                  : 'border-gray-200 hover:border-[#ff3f6c]'
+              }`}
+            >
+              <img src={item.src} alt={item.name} className="w-full h-full object-cover" />
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                <p className="text-[11px] font-bold text-white">{item.name}</p>
+              </div>
+              {active && (
+                <div className="absolute top-2 right-2 bg-[#ff3f6c] text-white rounded-full p-1">
+                  <CheckCircle2 size={12} />
+                </div>
+              )}
+              <div className="absolute inset-0 bg-[#ff3f6c]/0 group-hover:bg-[#ff3f6c]/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                <span className="bg-white text-[#ff3f6c] text-[11px] font-black px-3 py-1.5 rounded-full shadow">
+                  Try it on
+                </span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── Navbar ──────────────────────────────────────────────────────────────────
 function Navbar({ user, onLogout }) {
   return (
@@ -168,7 +227,7 @@ function UploadZone({ step, label, sublabel, description, file, onFile, onClear 
 }
 
 // ─── Result Panel ─────────────────────────────────────────────────────────────
-function ResultPanel({ resultImage, isLoading }) {
+function ResultPanel({ resultImage, isLoading, onTryAgain }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-3 mb-3">
@@ -180,17 +239,25 @@ function ResultPanel({ resultImage, isLoading }) {
           <p className="text-[11px] text-gray-400">AI-generated try-on</p>
         </div>
         {resultImage && (
-          <a
-            href={resultImage}
-            download="styra-tryon.png"
-            className="ml-auto flex items-center gap-1.5 bg-[#ff3f6c] text-white text-[12px] font-bold px-3 py-1.5 rounded-lg hover:bg-[#e8365f] transition-colors shadow-[0_2px_8px_rgba(255,63,108,0.3)]"
-          >
-            <Download size={13} />
-            Download
-          </a>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={onTryAgain}
+              className="flex items-center gap-1.5 bg-white border border-[#ff3f6c] text-[#ff3f6c] text-[12px] font-bold px-3 py-1.5 rounded-lg hover:bg-pink-50 transition-colors"
+            >
+              <Sparkles size={13} />
+              Try Another
+            </button>
+            <a
+              href={resultImage}
+              download="styra-tryon.png"
+              className="flex items-center gap-1.5 bg-[#ff3f6c] text-white text-[12px] font-bold px-3 py-1.5 rounded-lg hover:bg-[#e8365f] transition-colors shadow-[0_2px_8px_rgba(255,63,108,0.3)]"
+            >
+              <Download size={13} />
+              Download
+            </a>
+          </div>
         )}
       </div>
-
       <div
         className={`flex-1 rounded-xl overflow-hidden border-2 transition-all duration-200 ${
           resultImage ? 'border-[#ff3f6c]/40' : 'border-dashed border-gray-200'
@@ -239,54 +306,103 @@ function ResultPanel({ resultImage, isLoading }) {
   )
 }
 
-// ─── Paywall Screen ───────────────────────────────────────────────────────────
-function PaywallScreen({ user, onLogout, paymentError, onClearError }) {
+// ─── Paywall Modal ────────────────────────────────────────────────────────────
+function PaywallModal({ user, onClose, paymentError, onClearError, onRefresh }) {
+  const [refreshing, setRefreshing] = useState(false)
   const handleSubscribe = () => {
     window.location.href = `${PAYMENT_LINK}?client_reference_id=${user.id}`
   }
+  const handleRefreshClick = async () => {
+    if (!onRefresh) return
+    setRefreshing(true)
+    try { await onRefresh() } finally { setRefreshing(false) }
+  }
 
   return (
-    <div className="min-h-screen bg-[#fafafa] flex flex-col">
-      <Navbar user={user} onLogout={onLogout} />
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-10 max-w-md w-full text-center">
-          <div className="w-16 h-16 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Lock size={28} className="text-[#ff3f6c]" />
+    <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-2xl p-8 max-w-md w-full text-center relative">
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors"
+          aria-label="Close"
+        >
+          <X size={15} className="text-gray-600" />
+        </button>
+        <div className="w-16 h-16 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <Lock size={28} className="text-[#ff3f6c]" />
+        </div>
+        <h2 className="text-[24px] font-black text-gray-900 tracking-tight">Unlock Unlimited Try-Ons</h2>
+        <p className="text-[14px] text-gray-500 mt-2">You've used your free try-on — subscribe to continue.</p>
+        <p className="text-[32px] font-black text-[#ff3f6c] mt-5">
+          $9.99<span className="text-[16px] font-semibold text-gray-400"> / month</span>
+        </p>
+        <p className="text-[12px] text-gray-400 mb-6">Cancel anytime</p>
+
+        <ul className="text-left space-y-2.5 mb-8">
+          {['Unlimited AI try-ons', 'Download your results', 'New features every month'].map((f) => (
+            <li key={f} className="flex items-center gap-2 text-[13px] text-gray-600">
+              <CheckCircle2 size={14} className="text-[#ff3f6c] shrink-0" />
+              {f}
+            </li>
+          ))}
+        </ul>
+
+        {paymentError && (
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4 text-left">
+            <AlertCircle size={14} className="text-red-500 shrink-0" />
+            <p className="text-[12px] text-red-600 flex-1">{paymentError}</p>
+            <button onClick={onClearError}><X size={13} className="text-red-400" /></button>
           </div>
-          <h2 className="text-[24px] font-black text-gray-900 tracking-tight">Unlock Styra Studio</h2>
-          <p className="text-[14px] text-gray-500 mt-2">Get unlimited access to AI virtual try-on</p>
-          <p className="text-[32px] font-black text-[#ff3f6c] mt-5">
-            $9.99<span className="text-[16px] font-semibold text-gray-400"> / month</span>
-          </p>
-          <p className="text-[12px] text-gray-400 mb-6">Cancel anytime</p>
+        )}
 
-          <ul className="text-left space-y-2.5 mb-8">
-            {['Unlimited AI try-ons', 'Download your results', 'New features every month'].map((f) => (
-              <li key={f} className="flex items-center gap-2 text-[13px] text-gray-600">
-                <CheckCircle2 size={14} className="text-[#ff3f6c] shrink-0" />
-                {f}
-              </li>
-            ))}
-          </ul>
-
-          {paymentError && (
-            <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4 text-left">
-              <AlertCircle size={14} className="text-red-500 shrink-0" />
-              <p className="text-[12px] text-red-600 flex-1">{paymentError}</p>
-              <button onClick={onClearError}><X size={13} className="text-red-400" /></button>
-            </div>
-          )}
-
+        <button
+          onClick={handleSubscribe}
+          className="w-full py-3.5 bg-[#ff3f6c] text-white font-black text-[15px] rounded-xl hover:bg-[#e8365f] transition-colors shadow-[0_4px_16px_rgba(255,63,108,0.35)]"
+        >
+          Subscribe for $9.99 / month
+        </button>
+        {onRefresh && (
           <button
-            onClick={handleSubscribe}
-            className="w-full py-3.5 bg-[#ff3f6c] text-white font-black text-[15px] rounded-xl hover:bg-[#e8365f] transition-colors shadow-[0_4px_16px_rgba(255,63,108,0.35)]"
+            onClick={handleRefreshClick}
+            disabled={refreshing}
+            className="mt-3 block w-full text-[12px] text-gray-500 hover:text-[#ff3f6c] transition-colors disabled:opacity-50"
           >
-            Subscribe for $9.99 / month
+            {refreshing ? 'Checking…' : 'Already subscribed? Refresh status'}
           </button>
-          <button onClick={onLogout} className="mt-4 block w-full text-[12px] text-gray-400 hover:text-gray-600 transition-colors">
-            Log out
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Subscription Banner ──────────────────────────────────────────────────────
+function SubscriptionBanner({ freeTryUsed, onSubscribe }) {
+  if (freeTryUsed) {
+    return (
+      <div className="max-w-[1280px] mx-auto px-6 pt-4">
+        <div className="flex items-center gap-3 bg-gradient-to-r from-[#ff3f6c]/10 to-pink-50 border border-[#ff3f6c]/30 rounded-xl px-4 py-3">
+          <Lock size={16} className="text-[#ff3f6c] shrink-0" />
+          <p className="text-[13px] text-gray-700 flex-1">
+            <span className="font-bold">You've used your free try-on.</span>{' '}
+            <span className="text-gray-500">Subscribe for unlimited access to Styra Studio.</span>
+          </p>
+          <button
+            onClick={onSubscribe}
+            className="text-[12px] font-bold bg-[#ff3f6c] text-white px-4 py-2 rounded-lg hover:bg-[#e8365f] transition-colors shrink-0"
+          >
+            Subscribe — $9.99/mo
           </button>
         </div>
+      </div>
+    )
+  }
+  return (
+    <div className="max-w-[1280px] mx-auto px-6 pt-4">
+      <div className="flex items-center gap-3 bg-pink-50/60 border border-pink-100 rounded-xl px-4 py-2.5">
+        <Sparkles size={14} className="text-[#ff3f6c] shrink-0" />
+        <p className="text-[12px] text-gray-600">
+          <span className="font-bold text-gray-800">Free try-on included</span> — click Generate to see Styra in action.
+        </p>
       </div>
     </div>
   )
@@ -323,31 +439,58 @@ export default function App() {
   useEffect(() => {
     if (!user) return
     setProfileLoading(true)
-    supabase.from('profiles').select('subscription_status').eq('id', user.id).single()
+    supabase.from('profiles').select('subscription_status').eq('id', user.id).maybeSingle()
       .then(({ data }) => {
         setProfile(data ?? { subscription_status: 'free' })
         setProfileLoading(false)
       })
   }, [user?.id])
 
+  const refreshProfile = async () => {
+    if (!user) return null
+    console.log('[styra] refreshProfile: fetching for user', user.id)
+    const { data, error } = await supabase.from('profiles').select('subscription_status').eq('id', user.id).maybeSingle()
+    console.log('[styra] refreshProfile result:', { data, error })
+    if (data) setProfile(data)
+    return data
+  }
+
   // Handle ?session_id=cs_... redirect back from Stripe checkout
   useEffect(() => {
     if (!user || profileLoading || sessionHandledRef.current) return
+    console.log('[styra] post-payment effect: URL =', window.location.search)
     const params = new URLSearchParams(window.location.search)
     const sessionId = params.get('session_id')
-    if (!sessionId || !sessionId.startsWith('cs_')) return
+    if (!sessionId || !sessionId.startsWith('cs_')) {
+      console.log('[styra] no session_id in URL — skipping verify-payment')
+      return
+    }
 
+    console.log('[styra] found session_id:', sessionId)
     sessionHandledRef.current = true
     window.history.replaceState({}, '', window.location.pathname)
     setVerifyingPayment(true)
 
     supabase.functions.invoke('verify-payment', { body: { session_id: sessionId } })
       .then(async ({ data, error }) => {
+        console.log('[styra] verify-payment response:', { data, error })
         if (error || data?.error) {
           setPaymentError(error?.message || data?.error || 'Payment verification failed. Please contact support.')
+          setShowPaywall(true)
+          return
+        }
+        let profileData = await refreshProfile()
+        if (profileData?.subscription_status !== 'active') {
+          console.log('[styra] profile still not active — retrying in 1s')
+          await new Promise((r) => setTimeout(r, 1000))
+          profileData = await refreshProfile()
+        }
+        if (profileData?.subscription_status === 'active') {
+          setSubscribedToast(true)
+          setShowPaywall(false)
+          setTimeout(() => setSubscribedToast(false), 5000)
         } else {
-          const { data: profileData } = await supabase.from('profiles').select('subscription_status').eq('id', user.id).single()
-          setProfile(profileData ?? { subscription_status: 'free' })
+          console.warn('[styra] profile never flipped to active after verify-payment')
         }
       })
       .finally(() => setVerifyingPayment(false))
@@ -358,6 +501,30 @@ export default function App() {
   const [resultImage, setResultImage] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [selectedCatalogSrc, setSelectedCatalogSrc] = useState(null)
+  const [freeTryUsed, setFreeTryUsed] = useState(false)
+  const [showPaywall, setShowPaywall] = useState(false)
+  const [subscribedToast, setSubscribedToast] = useState(false)
+
+  const freeTryKey = user ? `styra:free-try-used:${user.id}` : null
+  const isActive = profile?.subscription_status === 'active'
+
+  // Load free-try flag when user changes
+  useEffect(() => {
+    if (!freeTryKey) return
+    setFreeTryUsed(localStorage.getItem(freeTryKey) === '1')
+  }, [freeTryKey])
+
+  const handlePickCatalog = async (item) => {
+    try {
+      const file = await urlToFile(item.src, `${item.name.replace(/\s+/g, '-').toLowerCase()}.png`)
+      setFile2({ file, preview: item.src })
+      setSelectedCatalogSrc(item.src)
+      setResultImage(null)
+    } catch (err) {
+      setError('Could not load that item. Please try another.')
+    }
+  }
 
   const canGenerate = !!file1 && !!file2 && !isLoading
 
@@ -374,6 +541,16 @@ export default function App() {
 
   const handleGenerate = async () => {
     if (!canGenerate) return
+    console.log('[styra] handleGenerate: isActive=', isActive, 'freeTryUsed=', freeTryUsed, 'profile=', profile)
+    if (!isActive && freeTryUsed) {
+      const latest = await refreshProfile()
+      if (latest?.subscription_status === 'active') {
+        console.log('[styra] refreshed profile shows active — proceeding with generate')
+      } else {
+        setShowPaywall(true)
+        return
+      }
+    }
     if (!WEBHOOK_URL) {
       setError('Webhook URL is not configured. Add VITE_WEBHOOK_URL to your Vercel environment variables.')
       return
@@ -394,6 +571,10 @@ export default function App() {
       if (blob.size === 0) throw new Error('No image was returned. Please try again.')
 
       setResultImage(URL.createObjectURL(blob))
+      if (!isActive && freeTryKey) {
+        localStorage.setItem(freeTryKey, '1')
+        setFreeTryUsed(true)
+      }
     } catch (err) {
       setError(err.message || 'Something went wrong. Please try again.')
     } finally {
@@ -433,20 +614,42 @@ export default function App() {
     )
   }
 
-  if (profile?.subscription_status !== 'active') {
-    return (
-      <PaywallScreen
-        user={user}
-        onLogout={handleLogout}
-        paymentError={paymentError}
-        onClearError={() => setPaymentError(null)}
-      />
-    )
-  }
+  const handleOpenPaywall = () => setShowPaywall(true)
 
   return (
     <div className="min-h-screen bg-[#fafafa] font-sans">
       <Navbar user={user} onLogout={handleLogout} />
+
+      {!isActive && (
+        <SubscriptionBanner freeTryUsed={freeTryUsed} onSubscribe={handleOpenPaywall} />
+      )}
+
+      {subscribedToast && (
+        <div className="fixed top-20 right-6 z-50 flex items-center gap-2 bg-white border border-[#ff3f6c]/30 shadow-lg rounded-xl px-4 py-3 animate-in fade-in slide-in-from-top-2">
+          <CheckCircle2 size={16} className="text-[#ff3f6c]" />
+          <p className="text-[13px] font-semibold text-gray-800">Subscription active — enjoy unlimited try-ons!</p>
+          <button onClick={() => setSubscribedToast(false)} className="ml-2 text-gray-400 hover:text-gray-600">
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {showPaywall && (
+        <PaywallModal
+          user={user}
+          onClose={() => { setShowPaywall(false); setPaymentError(null) }}
+          paymentError={paymentError}
+          onClearError={() => setPaymentError(null)}
+          onRefresh={async () => {
+            const latest = await refreshProfile()
+            if (latest?.subscription_status === 'active') {
+              setShowPaywall(false)
+              setSubscribedToast(true)
+              setTimeout(() => setSubscribedToast(false), 5000)
+            }
+          }}
+        />
+      )}
 
       {/* Breadcrumb */}
       <div className="max-w-[1280px] mx-auto px-6 pt-4 flex items-center gap-1 text-[12px] text-gray-400">
@@ -491,6 +694,8 @@ export default function App() {
           </div>
         )}
 
+        <CatalogPicker onPick={handlePickCatalog} selectedSrc={selectedCatalogSrc} />
+
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto_1fr] gap-4 items-stretch">
           {/* Upload 1 */}
           <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm flex flex-col">
@@ -523,7 +728,7 @@ export default function App() {
               description="Upload the clothing or item to try on"
               file={file2}
               onFile={setFile2}
-              onClear={() => { setFile2(null); setResultImage(null) }}
+              onClear={() => { setFile2(null); setSelectedCatalogSrc(null); setResultImage(null) }}
             />
           </div>
 
@@ -557,7 +762,16 @@ export default function App() {
 
           {/* Result */}
           <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm flex flex-col">
-            <ResultPanel resultImage={resultImage} isLoading={isLoading} />
+            <ResultPanel
+              resultImage={resultImage}
+              isLoading={isLoading}
+              onTryAgain={() => {
+                setResultImage(null)
+                setFile2(null)
+                setSelectedCatalogSrc(null)
+                setError(null)
+              }}
+            />
           </div>
         </div>
 
